@@ -13,9 +13,11 @@ Enforced invariants:
   * Every listed skill exists in skills.md, and no `unverified` skill is
     allowed onto the page.
   * The chosen summary variant must be marked `status: approved`.
+  * A complete CV plan selects at least two distinct projects from the profile.
+  * The CV headline names the job's role, without unrelated second roles.
 
 Usage:
-    python render_cv.py --plan plan.json --profile ./profile \
+    python render_cv.py --plan plan.json --profile ./profile/hang \
         --template-root ./templates --out ./applications/<slug>
 """
 
@@ -171,40 +173,6 @@ def link(url: str, label: str | None = None) -> str:
     return rf"\href{{{tex_url(url)}}}{{{tex(shown)}}}"
 
 
-# Where a long address may break across lines. A printed CV shows the whole
-# URL, and a 118-character credential link has to wrap somewhere: with no
-# breakpoint at all TeX cannot break it and it runs straight into the margin.
-# ':' is excluded so a line never ends on a bare "https:".
-_URL_BREAK_AFTER = "/-.?&=_+,;"
-
-
-def url_text(url: str) -> str:
-    """The address as visible text: escaped, with break opportunities added.
-
-    No break is offered before another separator, so `https://` never splits
-    down the middle of its own `//` and a line never ends on a lone slash.
-    """
-    out = []
-    for i, ch in enumerate(url):
-        out.append(tex(ch))
-        following = url[i + 1] if i + 1 < len(url) else ""
-        if ch in _URL_BREAK_AFTER and following not in _URL_BREAK_AFTER + ":":
-            out.append(r"\allowbreak{}")
-    return "".join(out)
-
-
-def url_link(url: str) -> str:
-    r"""A link whose visible words ARE the address, scheme included.
-
-    A one-word label like "Demo" is a dead end on paper: printed, it says a
-    demo exists and gives the reader no way to reach it, because the target
-    lives only in the PDF's link annotation. The full address is longer, but
-    it is the only form that works in both media - clickable on screen, and
-    typeable from a sheet of paper.
-    """
-    return rf"\href{{{tex_url(url)}}}{{{url_text(url)}}}"
-
-
 # --------------------------------------------------------------------------
 # validation
 # --------------------------------------------------------------------------
@@ -304,7 +272,7 @@ def contact_bits(profile: dict) -> list[str]:
         bits.append(tex(p["phone"]))
     for key in ("linkedin", "github", "portfolio"):
         if not is_empty(p.get(key)):
-            bits.append(link(p[key]))
+            bits.append(link(p[key], {"linkedin": "LinkedIn", "github": "GitHub", "portfolio": "Portfolio"}[key]))
     return bits
 
 
@@ -397,25 +365,19 @@ def render_projects(profile: dict, section: dict, *, separate_details: bool = Fa
     return out
 
 
-# One labelled line per URL rather than a run of bare domains. The label says
-# what is on the other end before the reader clicks; the address after it is
-# what a person retypes from a printed copy.
-PROJECT_LINKS = (("demo", "Demo"), ("repo", "Git"))
+# Compact labels retain complete PDF hyperlink targets across every template.
+PROJECT_LINKS = (("demo", "Demo"), ("repo", "GitHub"))
 
 
 def render_project_links(entry: dict, wanted: list[str] | None = None) -> list[str]:
-    """Every destination the project records, unless the plan narrows it.
+    """Always retain a recorded demo, including for legacy repo-only plans.
 
-    `wanted` omitted means "everything this project actually has". A plan can
-    still pass `"links": ["repo"]` to drop one deliberately, but it can no
-    longer hide a destination by staying silent: a demo the profile records is
-    a fact the reader is entitled to, and it used to vanish by default.
+    The plan may select the optional repository; it cannot suppress a demo
+    supplied by the profile. Missing destinations are never invented.
     """
-    return [
-        r"\cvlinks{%s: %s}" % (label, url_link(entry[key]))
-        for key, label in PROJECT_LINKS
-        if (wanted is None or key in wanted) and not is_empty(entry.get(key))
-    ]
+    links = [link(entry[key], label) for key, label in PROJECT_LINKS
+             if (key == "demo" or wanted is None or key in wanted) and not is_empty(entry.get(key))]
+    return [r"\cvlinks{%s}" % r" $\cdot$ ".join(links)] if links else []
 
 
 def render_skills(profile: dict, section: dict, narrow: bool = False) -> list[str]:
@@ -500,15 +462,8 @@ def render_certifications(profile: dict, section: dict) -> list[str]:
         issued = fmt_month(c.get("issued", ""))
         if issued:
             parts.append(tex(issued))
-        # The whole address, not the words "Verify Credential" over a hidden
-        # href. A certification is a claim, and the verification link is the
-        # reader's only way to test it; hiding the address behind a label works
-        # on screen and leaves a printed copy with an unverifiable claim.
         if not is_empty(c.get("credential_url")):
-            if item.get("compact_link"):
-                parts.append(link(c["credential_url"], "Verify Credential"))
-            else:
-                parts.append("Verify: " + url_link(c["credential_url"]))
+            parts.append(link(c["credential_url"], "Verify Credential"))
         out.append(r"\cvplain{%s}" % r" $\cdot$ ".join(parts))
     return out
 
@@ -548,12 +503,8 @@ RENDERERS = {
 # otherwise: they are short, self-contained lists rather than narrative.
 # Override per section with "column": "side" or "main".
 #
-# Certifications used to be here and are not any more. Now that a credential
-# row carries its verification address in full, it is the longest unbroken
-# string on the page — 118 characters for the Azure one — and a 5.9cm column
-# spends six lines on it. That is the wrong column for it, and the sidebar is
-# the taller of the two, so those lines cost the whole page. A plan that wants
-# the old placement can still say "column": "side".
+# Certifications remain in the main column by default; an explicit column
+# selection in the plan can override their placement.
 SIDEBAR_TYPES = ("skills", "education", "languages")
 
 
@@ -810,9 +761,54 @@ def build_match_report(profile: dict, plan: dict) -> str:
 
 # --------------------------------------------------------------------------
 
+def check_project_selection(profile: dict, plan: dict) -> None:
+    """Require two real projects without fabricating or duplicating evidence."""
+    selected = []
+    for section in plan.get("sections", []):
+        if section.get("type") == "projects":
+            for item in section.get("entries", []):
+                selected.append(_resolve(profile, item["source"], "project")["id"])
+    if len(selected) != len(set(selected)):
+        raise PlanError("duplicate project entries; select distinct projects")
+    if len(selected) < 2:
+        if len(profile.get("projects", [])) < 2:
+            raise PlanError("at least 2 distinct projects are required; the selected profile "
+                            "needs another factual project before generating a CV")
+        raise PlanError("at least 2 distinct projects are required; select the strongest "
+                        "relevant or transferable projects from the selected profile")
+
+
+ROLE_PATTERNS = {
+    "frontend": re.compile(r"\b(?:front[ -]?end|react (?:developer|engineer)|angular (?:developer|engineer)|ui developer)\b", re.I),
+    "testing": re.compile(r"\b(?:qa|qc|tester|testing|test automation|test engineer|quality assurance|sdet|kiểm thử)\b", re.I),
+    "fullstack": re.compile(r"\bfull[ -]?stack\b", re.I),
+    "devops": re.compile(r"\b(?:dev[ -]?ops|site reliability|sre)\b", re.I),
+}
+
+
+def check_headline_for_job(plan: dict, job_title: str | None = None) -> None:
+    """Reject a headline that adds a role the posting does not advertise."""
+    job = plan.get("job") or {}
+    title = str(job_title if job_title is not None else job.get("title") or "").strip()
+    headline = plan.get("headline")
+    if not isinstance(headline, str) or not headline.strip():
+        if title:
+            raise PlanError("a job-specific headline is required in the CV plan")
+        return  # Older standalone plans may still use the profile's default.
+    headline = headline.strip()
+    requested = {role for role, pattern in ROLE_PATTERNS.items() if pattern.search(title)}
+    displayed = {role for role, pattern in ROLE_PATTERNS.items() if pattern.search(headline)}
+    dual_job = len(requested) > 1
+    if not dual_job and ("|" in headline or len(displayed) > 1):
+        raise PlanError("headline lists multiple roles or a tagline; use one role matching the job")
+    if len(requested) == 1 and not requested.issubset(displayed):
+        raise PlanError(f"headline role does not match the job title {title!r}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", required=True, type=Path)
+    ap.add_argument("--job-title", help="approved posting title; overrides the plan's shortened title for headline validation")
     ap.add_argument("--profile", required=True, type=Path)
     ap.add_argument("--template-root", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
@@ -821,8 +817,10 @@ def main() -> int:
     try:
         profile = load_profile(args.profile)
         plan = json.loads(args.plan.read_text(encoding="utf-8"))
+        check_project_selection(profile, plan)
+        check_headline_for_job(plan, args.job_title)
 
-        name = plan.get("template", "ats-single-column")
+        name = plan.get("template", "navy-header-photo")
         template_file = args.template_root / name / "template.tex"
         if not template_file.exists():
             raise PlanError(

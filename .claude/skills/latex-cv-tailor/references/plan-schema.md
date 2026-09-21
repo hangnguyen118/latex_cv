@@ -9,7 +9,7 @@ profile and refuses anything the profile does not support.
 
 Company names, role titles, employment dates, locations, institution names,
 GPA, credential URLs, project tech stacks and project links. The renderer reads
-all of those from `profile/` by ID. Anything you write for those fields is
+all of those from the selected profile by ID. Anything you write for those fields is
 ignored — which is the point: a date cannot drift.
 
 ## Shape
@@ -56,12 +56,21 @@ ignored — which is the point: a date cannot drift.
       "entries": [
         {
           "source": "PRJ-SHOPEE-QA",
-          "links": ["repo"],
+          "links": ["repo", "demo"],
           "show_tech": true,
           "bullets": [
             {
               "source": ["PRJ-SHOPEE-QA-01", "PRJ-SHOPEE-QA-02"],
               "text": "Built a Playwright framework covering 21 test cases across 4 targets."
+            }
+          ]
+        },
+        {
+          "source": "PRJ-BROWSERMIND",
+          "bullets": [
+            {
+              "source": ["PRJ-BROWSERMIND-01"],
+              "text": "Used Spec-Driven Development to turn product requirements into an application with clear specifications and automated validation."
             }
           ]
         }
@@ -93,6 +102,27 @@ ignored — which is the point: a date cannot drift.
 }
 ```
 
+## Job-specific headline
+
+Copy `job.title` from the actual posting. `headline` is a single role aligned
+with that title, such as `Frontend Developer` for frontend work or `Software
+Tester` for a Tester/QA role. The renderer rejects a missing headline, an
+unrelated role, and a `|` tagline on a single-role job. A combined frontend
+and testing headline is allowed only when the job title explicitly names both.
+Do not use the candidate's broader target-role list as the printed headline.
+Put matching technologies and transferable experience in other sections.
+When seek_job launches the renderer, it passes `--job-title` from the approved
+job snapshot; that title is authoritative even if `plan.job.title` is shortened.
+
+## Project selection
+
+Every complete CV plan must select at least two distinct project IDs from the
+selected profile. Prefer direct matches, then transferable skills; keep claims
+faithful to the evidence. If fewer than two projects exist in the profile, stop
+and report the missing factual data. Repeating an ID does not satisfy the rule.
+The CV must fit within two pages. Start with two distinct projects and concise,
+relevant bullets; keep readable type and use short clickable link labels.
+
 ## Field notes
 
 - **`sections`** render in the order you list them. A section whose content
@@ -110,7 +140,7 @@ ignored — which is the point: a date cannot drift.
   the main column. Single-column templates ignore it entirely.
 - **`type`** is one of `experience`, `projects`, `skills`, `education`,
   `certifications`, `languages`.
-- **`languages`** entries cite `LANG-` IDs from `profile/languages.md`. The
+- **`languages`** entries cite `LANG-` IDs from `<profile-path>/languages.md`. The
   proficiency and its descriptor come from the profile; the plan chooses only
   which languages appear and in what order. Do not also list a language
   certification under `certifications` — the row would say the same thing
@@ -120,9 +150,11 @@ ignored — which is the point: a date cannot drift.
 - **`bullets[].text`** is your wording. Rewrite freely for concision and the
   posting's vocabulary — but the meaning must survive unchanged, and any number
   in it must already exist in the profile.
-- **`links`** picks which of the project's URLs to print: `["repo"]`,
-  `["demo"]`, or both. Defaults to `["repo"]`. Each one prints on its own line,
-  labelled `Demo:` or `Git:`, so two links cost two lines of the page budget.
+- **`links`** may select the optional repository; omitting it shows all available
+  destinations. A Demo recorded in the profile is always shown, even with
+  `"links": ["repo"]` or `"links": []`. Do not omit a demo to save space, and
+  never invent missing URLs. Short clickable labels `Demo` and `GitHub` share
+  one line; full destination URLs, including query parameters, are preserved.
 - **`show_tech`** prints the project's tech stack line. Defaults to `true`.
 - **`skills.groups[].label`** is yours to choose; group by what the posting
   emphasises rather than copying the profile's own categories.

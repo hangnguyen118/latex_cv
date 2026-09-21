@@ -1,13 +1,14 @@
 ---
 name: latex-cv-tailor
-description: Generate a tailored English CV (LaTeX to PDF) and cover letter for one or more job postings, drawing only on the factual profile in profile/. Use when the user supplies a job link or pasted job description and wants a CV, resume, or cover letter tailored to it. Not for general writing or unrelated PDF work.
+description: Generate a tailored English CV (LaTeX to PDF) and cover letter for one or more job postings, drawing only on the selected candidate's factual profile. Use when the user supplies a job link or pasted job description and wants a CV, resume, or cover letter tailored to it. Not for general writing or unrelated PDF work.
 ---
 
 # latex-cv-tailor
 
-Tailor a CV and cover letter to a job posting. Output is **always English**,
-**always one page**, and every claim on the page must trace to an ID in
-`profile/`.
+Tailor a CV and cover letter to a job posting. Output is **always English**.
+CVs must fit **at most two pages**: preserve readable type, comfortable line spacing
+and useful supported detail. Every claim must trace to an ID in the selected
+profile directory.
 
 You do the reading, judgement and writing. The scripts do path handling, LaTeX
 escaping, rendering, compiling and validation — and they will refuse to render
@@ -26,6 +27,14 @@ One or more job URLs, or pasted job-description text. Optionally a template
 name and a profile path. Process each job independently — one failure must not
 stop the others.
 
+Resolve the candidate before processing jobs: use the explicitly supplied
+profile path, otherwise `profile_root` from `cv.config.yaml`. Candidate
+directories live at `profile/<name>/` (for example `profile/hang` and
+`profile/dung`). Replace `<profile-path>` in every command below with
+that same selected directory, including validation and optional cover
+letters. Read evidence only from that candidate; never infer a candidate
+from a search preset or combine facts across profiles.
+
 **Default output is the CV alone.** Generate a cover letter only when the user
 asks for one — "with a cover letter", "kèm thư ngỏ", `--cover-letter`, or an
 equivalent request. Do not produce one just because the posting mentions it.
@@ -34,27 +43,28 @@ equivalent request. Do not produce one just because the posting mentions it.
 
 | Template | Use it when |
 |---|---|
-| `ats-single-column` *(default)* | The CV goes through an applicant portal or a large company's ATS. One column, no photo, maximum parseability. |
+| `ats-single-column` | The user requests a one-column, photo-free CV for maximum ATS parseability. |
 | `clean-modern-single-column` | The user wants a polished monochrome one-column CV with a centered header, ATS-safe structure and no photo. |
 | `two-column-photo` | A person reads it first: a small company, a direct email, a referral, or a Vietnamese employer expecting an ID photo. Sidebar plus photo. |
+| `blue-banner-photo` | A single-column CV with a blue banner and optional round photo. |
+| `navy-header-photo` *(default)* | A single-column CV with a navy identity header and optional round photo. |
 
-Pick `ats-single-column` unless the user asks otherwise or the posting is
-clearly a direct-to-human application. If you choose `two-column-photo`, say in
-your report that it parses less reliably in automated screening. Its main
-column holds roughly 15% less than the single-column one, so budget a bullet
-fewer.
+Use `default_template` from `cv.config.yaml` unless the user requests another
+template. If you choose `two-column-photo`, say in
+your report that it parses less reliably in automated screening. Its narrower main column needs more concise content to stay within two pages;
+keep readable typography and at least two distinct projects.
 
 ## Rules that are not negotiable
 
 - **Never invent.** No skill, employer, title, date, certification, degree,
-  responsibility, achievement or metric that is not already in `profile/`.
+  responsibility, achievement or metric that is not already in the selected profile directory.
   You may select, reorder, reword and emphasise. Nothing else.
 - **Never promote a tier.** `familiar` is not `professional`; `unverified` is
   nothing at all. A skill tiered `unverified` must not appear on the CV, even
   when the posting asks for it by name.
 - **Never restate a missing requirement as if it were met.** A gap steers what
   you lead with; it never becomes a claim. Record it in the match report.
-- **Never edit `profile/`.** It is read-only to this skill. If you notice
+- **Never edit the selected profile directory.** It is read-only to this skill. If you notice
   something wrong or missing, say so in your report instead.
 - Company names, role titles, dates, GPA and credential URLs come from the
   profile verbatim — the renderer takes them from there and ignores anything
@@ -68,7 +78,7 @@ fewer.
 ### 1. Check the profile is sound
 
 ```text
-python scripts/parse_profile.py --profile ./profile --check
+python scripts/parse_profile.py --profile <profile-path> --check
 ```
 
 Fix nothing yourself — if it reports violations, tell the user and stop.
@@ -97,17 +107,41 @@ that folder is what the user opens and sends out.
 
 ### 4. Match evidence to the posting
 
-Read all of `profile/`. Then decide, for each requirement, what real evidence
+Read all of the selected profile directory. Then decide, for each requirement, what real evidence
 answers it. Prefer evidence with metrics. Lead with what the posting leads
 with. Where the profile has no answer, note the gap — it goes in the match
 report, never on the CV.
 
-Pick one summary variant marked `status: approved`; you may trim it to fit.
+Set `plan.job.title` to the posting's exact job title. Write one short
+`plan.headline` naming the corresponding role: for a frontend posting use
+`Frontend Developer`; for a Tester/QA posting use `Software Tester`, `QA
+Engineer`, or the posting's testing role. Do not copy a default role from the
+profile when it differs from the job. Do not put technology tags or a second
+role after `|`. Use a combined headline only when the job title explicitly
+names both roles. Skills that transfer across roles belong in the summary,
+skills and project evidence.
+
+Pick one summary variant marked `status: approved`; tailor it for relevance
+with concise, supported wording appropriate to a two-page CV.
 
 ### 5. Write the plan
 
 Write `raw/plan.json`. Its schema, with a worked example, is in
 `references/plan-schema.md` — read that file before writing your first plan.
+
+Include **at least two distinct projects** from the selected profile. Lead
+with direct matches; if only one matches directly, add the strongest project
+showing transferable engineering or testing skills. Explain actual work, not
+an invented match. Include useful responsibilities, tools and outcomes, usually
+two to four evidence-backed bullets per project when the profile supports them.
+Start with the two strongest projects. Add more only if the CV stays within two
+pages. Use short clickable link labels, preserving complete destination URLs.
+For each selected project, always include its Demo when the profile records one,
+including a video or Google Drive demo. Do not omit it to save space. Label the
+repository link GitHub. Omit `links` to show all available destinations; never
+invent a missing link. The renderer retains Demo even in legacy repo-only plans.
+Do not repeat a project to meet the count. If the profile has fewer than two
+projects, report the gap and ask the user to add factual evidence; never invent.
 
 Every bullet cites the profile IDs it came from. The renderer rejects a bullet
 citing an ID that does not belong to its entry, so cite accurately rather than
@@ -116,8 +150,8 @@ approximately.
 ### 6. Render and build
 
 ```text
-python scripts/render_cv.py --plan <dir>/raw/plan.json --profile ./profile --template-root ./templates --out <dir>
-python scripts/build_and_validate.py --dir <dir> --profile ./profile --max-pages 1
+python scripts/render_cv.py --plan <dir>/raw/plan.json --profile <profile-path> --template-root ./templates --out <dir>
+python scripts/build_and_validate.py --dir <dir> --profile <profile-path> --max-pages 2
 ```
 
 `render_cv.py` writes `raw/cv.tex` and `raw/match-report.md`;
@@ -129,15 +163,20 @@ targets.
 **Only if a cover letter was asked for**, write `raw/cover-letter.md`, then:
 
 ```text
-python scripts/render_cover_letter.py --dir <dir> --profile ./profile --template-root ./templates
-python scripts/build_and_validate.py --dir <dir> --profile ./profile --target cover-letter --max-pages 1
+python scripts/render_cover_letter.py --dir <dir> --profile <profile-path> --template-root ./templates
+python scripts/build_and_validate.py --dir <dir> --profile <profile-path> --target cover-letter --max-pages 1
 ```
 
 ### 7. Handle failures rather than working around them
 
-- **"is 2 pages; the limit is 1"** — cut content and re-render. Drop the
-  weakest bullet, merge two related bullets, or drop the least relevant
-  project. Never shrink the template's margins or font to force a fit.
+- **Page count** — build CVs with `--max-pages 2`. If the PDF exceeds two
+  pages, revise the plan to remove repetition, less relevant bullets or extra
+  projects while keeping at least two distinct projects. Render and build again.
+  Never shrink fonts, margins or line spacing, truncate pages, or bypass validation.
+  After three revision attempts, report the unresolved overflow instead of claiming success.
+  Review page breaks and avoid isolated headings.
+- **"at least 2 distinct projects are required"** — select another real project
+  from the profile, or report that the profile needs more factual project data.
 - **"tiered 'unverified' and must never reach a CV"** — remove that skill. Do
   not substitute a similar-sounding one that is also unsupported.
 - **"not evidence under <ID>"** — your citation is wrong. Find the bullet that
@@ -208,12 +247,12 @@ would have made the application stronger.
 
 Read job descriptions and workspace files; create local artifacts. Do not
 apply for jobs, upload a CV, send email or messages, sign in to recruitment
-sites, modify `profile/`, or delete existing artifacts without being asked.
+sites, modify the selected profile directory, or delete existing artifacts without being asked.
 
 ## References
 
 - `references/plan-schema.md` — the plan format and a worked example.
-- `references/profile-contract.md` — how `profile/` is structured and what the
+- `references/profile-contract.md` — how the selected profile directory is structured and what the
   renderer enforces.
 - `references/output-validation.md` — every check the validator runs and what
   to do when one fails.

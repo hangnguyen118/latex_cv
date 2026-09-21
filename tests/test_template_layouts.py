@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from parse_profile import load_profile
-from render_cv import PlanError, render_marked, substitute_markers
+from render_cv import PlanError, render_marked, substitute_markers, render_project_links
 
 
 class BlueBannerLayout(unittest.TestCase):
@@ -39,7 +39,7 @@ class BlueBannerLayout(unittest.TestCase):
         self.assertEqual(re.findall(r"\\cvsection\{([^}]+)\}", doc), [
             "Summary", "Education", "Skills", "Certifications", "Experience", "Projects",
         ])
-        for fact in ("Test University", "GPA 3.9 / 4.0", "Verify: ",
+        for fact in ("Test University", r"\cveducation{Test University}{}{January 2024}{3.9 / 4.0}{}", "Verify Credential",
                      r"\cvskill{Core}{C\#, Python}", "Acme",
                      # A project is dated by a range, like every other entry.
                      r"\cvitem{\textbf{Widget\_Tool}}{Apr 2025 – Sep 2025}"):
@@ -50,27 +50,18 @@ class BlueBannerLayout(unittest.TestCase):
         doc = self.render()
         self.assertIn(r"\cvprojectrole{Developer}", doc)
         self.assertIn(r"\cvmeta{Python, C++}", doc)
-        # The address is the visible text, not a "GitHub"/"Demo" label whose
-        # target survives only as a PDF link annotation. Printed, a label is a
-        # dead end, so what is typeset has to be the whole URL.
         self.assertIn(
-            r"\cvlinks{GitHub: \href{https://github.com/alexsample/widget_tool}"
-            r"{https://\allowbreak{}github.\allowbreak{}com/\allowbreak{}alexsample"
-            r"/\allowbreak{}widget\_\allowbreak{}tool}}",
-            doc,
-        )
-        # `//` is never split down the middle, and `&`/`_` stay escaped in the
-        # visible text while the href argument keeps them raw.
-        self.assertNotIn(r"https:/\allowbreak{}/", doc)
+            r"\href{https://github.com/alexsample/widget_tool}{GitHub}", doc)
+        self.assertNotIn(r"\allowbreak{}", doc)
 
     def test_missing_optional_project_fields_are_not_invented(self):
         project = self.profile["projects"][0]
         project.pop("demo")
         project.pop("role")
         doc = self.render()
-        self.assertNotIn("Demo: ", doc)
+        self.assertNotIn("{Demo}", doc)
         self.assertNotIn(r"\cvprojectrole{", doc)
-        self.assertIn("GitHub: ", doc)
+        self.assertIn("{GitHub}", doc)
 
     def test_show_tech_false_is_respected(self):
         self.plan["sections"][0]["entries"][0]["show_tech"] = False
@@ -98,42 +89,59 @@ class BlueBannerLayout(unittest.TestCase):
         with self.assertRaisesRegex(PlanError, "unverified"):
             self.render()
 
-    def test_legacy_layout_keeps_plan_order_and_selected_links(self):
+    def test_legacy_layout_keeps_plan_order_and_restores_demo(self):
         for name in ("ats-single-column", "two-column-photo"):
             with self.subTest(template=name):
                 template = (ROOT / f"templates/{name}/template.tex").read_text(encoding="utf-8")
                 values = render_marked(self.profile, self.plan, template, None)
                 body = values["%%BODY%%"]
                 self.assertLess(body.index(r"\cvsection{Projects}"), body.index(r"\cvsection{Experience}"))
-                # The plan names only `repo`, so the demo stays off the page —
-                # an explicit narrowing still wins over "show what exists".
-                self.assertNotIn("Demo: ", body)
-                self.assertIn(r"\cvlinks{GitHub: \href{https://github.com/alexsample/widget_tool}", body)
+                # A legacy repo-only plan must still show the recorded demo.
+                self.assertIn("{Demo}", body)
+                self.assertIn(r"\href{https://github.com/alexsample/widget_tool}{GitHub}", body)
                 self.assertNotIn(r"\cvprojectrole{", body)
                 self.assertIn("Developer", body)
 
     def test_a_silent_plan_shows_every_destination_the_project_records(self):
         self.plan["sections"][0]["entries"][0].pop("links", None)
-        for name in ("ats-single-column", "two-column-photo", "blue-banner-photo"):
+        for name in ("ats-single-column", "two-column-photo", "blue-banner-photo", "clean-modern-single-column", "navy-header-photo"):
             with self.subTest(template=name):
                 template = (ROOT / f"templates/{name}/template.tex").read_text(encoding="utf-8")
                 doc = substitute_markers(
                     template, render_marked(self.profile, self.plan, template, None)
                 )
                 self.assertIn(
-                    r"\cvlinks{Demo: \href{https://example.test/widget?x=1&y=2}"
-                    r"{https://\allowbreak{}example.\allowbreak{}test"
-                    r"/\allowbreak{}widget?\allowbreak{}x=\allowbreak{}1"
-                    r"\&\allowbreak{}y=\allowbreak{}2}}",
-                    doc,
-                )
-                self.assertIn("GitHub: ", doc)
+                    r"\cvlinks{\href{https://example.test/widget?x=1&y=2}{Demo}"
+                    r" $\cdot$ \href{https://github.com/alexsample/widget_tool}{GitHub}}", doc)
+                self.assertNotIn(r"\allowbreak{}", doc)
 
     def test_a_project_without_start_and_end_still_renders_its_legacy_month(self):
         project = self.profile["projects"][0]
         project.pop("start"), project.pop("end")
         project["month"] = "2025-04"
         self.assertIn(r"{Apr 2025}", self.render())
+
+    def test_all_templates_keep_profile_demo_despite_plan_link_filter(self):
+        demo = "https://drive.google.com/file/d/synthetic-demo/view?usp=sharing&view=preview"
+        self.profile["projects"][0]["demo"] = demo
+        for template_path in sorted((ROOT / "templates").glob("*/template.tex")):
+            for wanted in (["repo"], [], ["demo"], ["repo", "demo"]):
+                with self.subTest(template=template_path.parent.name, links=wanted):
+                    self.plan["sections"][0]["entries"][0]["links"] = wanted
+                    before = copy.deepcopy(self.plan)
+                    doc = self.render(template=template_path.read_text(encoding="utf-8"))
+                    self.assertEqual(doc.count(r"\href{" + demo + "}{Demo}"), 1)
+                    repo = r"\href{https://github.com/alexsample/widget_tool}{GitHub}"
+                    self.assertEqual(doc.count(repo), int("repo" in wanted))
+                    self.assertNotIn("{Repository}", doc)
+                    self.assertEqual(self.plan, before)
+
+    def test_no_demo_placeholder_is_invented(self):
+        for demo in (None, "", "   "):
+            with self.subTest(demo=demo):
+                self.assertEqual(render_project_links({"demo": demo}, ["demo"]), [])
+        self.assertEqual(render_project_links({"demo": "https://example.test/demo"}, ["repo"]),
+                         [r"\cvlinks{\href{https://example.test/demo}{Demo}}"])
 
 
 if __name__ == "__main__":
